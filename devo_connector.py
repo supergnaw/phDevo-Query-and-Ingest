@@ -40,14 +40,30 @@ class RetVal(tuple):
     def __new__(cls, val1, val2=None):
         return tuple.__new__(RetVal, (val1, val2))
 
-
 class DevoConnector(BaseConnector):
+
+    @property
+    def app_id(self) -> str:
+        return str(self.get_app_json().get('appid', 'Unknown ID'))
+
+    @property
+    def app_version(self) -> str:
+        return str(self.get_app_json().get('app_version', '0.0.0'))
+
+    @property
+    def asset_id(self) -> str:
+        return str(self.get_asset_id())
+
+    @property
+    def action_id(self) -> str:
+        return str(self.get_action_identifier())
 
     def __init__(self):
 
         # Call the BaseConnectors init first
         super(DevoConnector, self).__init__()
 
+        self._params = None
         self._aggregate_fields = None
         self._state = None
 
@@ -59,9 +75,9 @@ class DevoConnector(BaseConnector):
         self._ingest_table = None
         self._ingest_range = None
 
-    # -----------------------------------#
+    # ----------------------------------#
     #   CONNECTOR REST CALL FUNCTIONS   #
-    # -----------------------------------#
+    # ----------------------------------#
 
     def _make_rest_call(self, endpoint, action_result, method="post", **kwargs):
         # **kwargs can be any additional parameters that requests.request accepts
@@ -223,7 +239,7 @@ class DevoConnector(BaseConnector):
         if not str(column_value).isdigit():
             return column_value
         # Convert "probable" IPs from integers to IP addresses
-        if self._might_be_an_ip(column_name, column_value):
+        if self._might_be_an_ip(column_name):
             try:
                 if type(ipaddress.ip_address(column_value)) is ipaddress.IPv4Address:
                     return str(ipaddress.IPv4Address(column_value))
@@ -233,7 +249,7 @@ class DevoConnector(BaseConnector):
                 e = """It's not an IP but we need to handle the exception"""
 
         # Convert likely candidates from integers to datetimes
-        elif self._might_be_a_date(column_name, column_value):
+        elif self._might_be_a_date(column_name):
             try:
                 return f"{datetime.datetime.utcfromtimestamp(column_value / 1e3).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z"
             except:
@@ -242,7 +258,7 @@ class DevoConnector(BaseConnector):
         # Plain ol' data
         return column_value
 
-    def _might_be_an_ip(self, column_name, column_value):
+    def _might_be_an_ip(self, column_name) -> bool:
         try:
             if not re.findall(r"((host|ip|s(ou)?rce?|de?st(ination)?).?(ip.?)?address|ip)", str(column_name).strip(),
                               re.IGNORECASE):
@@ -251,7 +267,7 @@ class DevoConnector(BaseConnector):
             return False
         return True
 
-    def _might_be_a_date(self, column_name, column_value):
+    def _might_be_a_date(self, column_name) -> bool:
         try:
             if not re.findall(r"date", str(column_name), re.IGNORECASE):
                 return False
@@ -259,27 +275,18 @@ class DevoConnector(BaseConnector):
             return False
         return True
 
-    # ----------------------#
+    # ---------------------#
     #   ACTION FUNCTIONS   #
-    # ----------------------#
+    # ---------------------#
 
-    def handle_action(self, param):
-        ret_val = phantom.APP_SUCCESS
+    def handle_action(self, param) -> bool:
+        self.param = param
+        self.save_progress(f"Starting action: {self.action_id}\n{json.dumps(self.param, indent=4)}")
 
-        # Get the action that we are supposed to execute for this App Run
-        action_id = self.get_action_identifier()
+        if not getattr(self, f"_handle_{self.action_id}")() and self.r_json:
+            self.save_progstat(phantom.APP_ERROR, f"{self.action_id} has no _handler function")
 
-        if self._debug_print:
-            self.debug_print("action_id", self.get_action_identifier())
-
-        if action_id == 'test_connectivity':
-            ret_val = self._handle_test_connectivity(param)
-        elif action_id == 'run_query':
-            ret_val = self._handle_run_query(param)
-        elif action_id == 'on_poll':
-            self.audit_log_add(f"Starting 'on_poll': {self.get_asset_name}")
-            ret_val = self._handle_on_poll(param)
-        return ret_val
+        return self.get_status()
 
     def _handle_test_connectivity(self, param):
         # Add an action result object to self (BaseConnector) to represent the action for this param
@@ -860,7 +867,7 @@ class DevoConnector(BaseConnector):
         # Input validation and parsing complete!
         return time_input_beg, time_input_end
 
-    def parse_time_increment(self, t_str):
+    def parse_time_increment(self, t_str) -> float | int:
         t_str = t_str.lower().strip()
 
         if "now" == t_str:
@@ -956,9 +963,9 @@ class DevoConnector(BaseConnector):
             output_list.remove("")
         return output_list
 
-    # ---------------------#
+    # --------------------#
     #   SOAR CONSTRUCTS   #
-    # ---------------------#
+    # --------------------#
 
     def initialize(self):
         # Load the state in initialize, use it to store data that needs to be accessed across actions
@@ -1009,6 +1016,14 @@ class DevoConnector(BaseConnector):
         self.save_state(self._state)
         return phantom.APP_SUCCESS
 
+    def _set_default_config(self, configs) -> None:
+        defaults = {}
+        for config in configs:
+            pass
+    def _set_default_params(self, params) -> None:
+        defaults = {}
+        for param in params:
+            pass
 
 def main():
     import argparse
