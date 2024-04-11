@@ -3,7 +3,7 @@
 # -----------------------------------------
 # Phantom sample App Connector python file
 # -----------------------------------------
-# Version 2.0.6
+# Version 2.0.7
 # -----------------------------------------
 
 # Python 3 Compatibility imports
@@ -34,10 +34,12 @@ import datetime
 import hashlib
 import uuid
 
+
 class RetVal(tuple):
 
     def __new__(cls, val1, val2=None):
         return tuple.__new__(RetVal, (val1, val2))
+
 
 class DevoConnector(BaseConnector):
 
@@ -57,9 +59,9 @@ class DevoConnector(BaseConnector):
         self._ingest_table = None
         self._ingest_range = None
 
-    #-----------------------------------#
+    # -----------------------------------#
     #   CONNECTOR REST CALL FUNCTIONS   #
-    #-----------------------------------#
+    # -----------------------------------#
 
     def _make_rest_call(self, endpoint, action_result, method="post", **kwargs):
         # **kwargs can be any additional parameters that requests.request accepts
@@ -80,7 +82,7 @@ class DevoConnector(BaseConnector):
         try:
             r = request_func(
                 self._base_url + endpoint
-                #, auth=(username, password),  # basic authentication
+                # , auth=(username, password),  # basic authentication
                 , verify=self._verify_server_cert
                 , **kwargs
             )
@@ -94,9 +96,9 @@ class DevoConnector(BaseConnector):
 
         return self._process_response(r, action_result)
 
-    #----------------------#
+    # ----------------------#
     #   RESPONSE PARSERS   #
-    #----------------------#
+    # ----------------------#
 
     def _process_response(self, r, action_result):
         # store the r_text in debug data, it will get dumped in the logs if the action fails
@@ -170,7 +172,7 @@ class DevoConnector(BaseConnector):
             )
 
         if 200 <= r.status_code < 399:
-        # Regular responses
+            # Regular responses
             return RetVal(phantom.APP_SUCCESS, resp_json)
         else:
             # You should process the error returned in the json
@@ -178,25 +180,25 @@ class DevoConnector(BaseConnector):
             err_message = resp_json["object"][0]
             err_details = ", ".join(resp_json["object"][1::])
             error_message = f"{err_message}: {err_details}"
-            #self.query_log_add(r.status_code, err_message, err_details)
+            # self.query_log_add(r.status_code, err_message, err_details)
             # we don't want the app to crash, so gracefully pass empty results instead
-            return RetVal(phantom.APP_SUCCESS, {"object":[]})
+            return RetVal(phantom.APP_SUCCESS, {"object": []})
 
-    def devo_abhorrently_disgraceful_response_cleanup(self, data):
-        # Devo responses are kinda dirty, so lets do some cleanup
+    def devo_response_cleanup(self, data):
+        # Devo responses are kinda dirty, so let's do some cleanup
         if isinstance(data, dict):
             for key, val in data.items():
                 # Recursive is the only way to travel!
                 if val is not "null" and val != None:
                     # Enhance!
                     val = self._response_cleanup_helper(key, val)
-                    data[key] = self.devo_abhorrently_disgraceful_response_cleanup(val)
+                    data[key] = self.devo_response_cleanup(val)
         elif isinstance(data, str) and data != "null":
             try:
                 # Sure, it SAYS it's a string, but is it actually a JSON in disguise?
                 data = json.loads(data)
                 # THE AUDACITY!
-                return self.devo_abhorrently_disgraceful_response_cleanup(data)
+                return self.devo_response_cleanup(data)
             except:
                 # Oopsies, it's not a valid json... Enhance!
                 # Whitespace is bad
@@ -215,7 +217,7 @@ class DevoConnector(BaseConnector):
 
         # You've completed your parsing, put that data back where it came from or so help me
         return data
-        
+
     def _response_cleanup_helper(self, column_name, column_value):
         # This is for specialty strings stored as digits, so if it isn't a digit, it's not worth computations
         if not str(column_value).isdigit():
@@ -229,26 +231,27 @@ class DevoConnector(BaseConnector):
                     return str(ipaddress.IPv6Address(column_value))
             except:
                 e = """It's not an IP but we need to handle the exception"""
-        
+
         # Convert likely candidates from integers to datetimes
-        elif self._might_be_an_date(column_name, column_value):
+        elif self._might_be_a_date(column_name, column_value):
             try:
-                return f"{datetime.datetime.utcfromtimestamp(column_value/1e3).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z"
+                return f"{datetime.datetime.utcfromtimestamp(column_value / 1e3).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3]}Z"
             except:
                 e = """It's not a date but we need to handle the exception"""
-        
+
         # Plain ol' data
         return column_value
-        
+
     def _might_be_an_ip(self, column_name, column_value):
         try:
-            if not re.findall(r"((host|ip|s(ou)?rce?|de?st(ination)?).?(ip.?)?address|ip)", str(column_name).strip(), re.IGNORECASE):
+            if not re.findall(r"((host|ip|s(ou)?rce?|de?st(ination)?).?(ip.?)?address|ip)", str(column_name).strip(),
+                              re.IGNORECASE):
                 return False
         except:
             return False
         return True
-        
-    def _might_be_an_date(self, column_name, column_value):
+
+    def _might_be_a_date(self, column_name, column_value):
         try:
             if not re.findall(r"date", str(column_name), re.IGNORECASE):
                 return False
@@ -256,9 +259,9 @@ class DevoConnector(BaseConnector):
             return False
         return True
 
-    #----------------------#
+    # ----------------------#
     #   ACTION FUNCTIONS   #
-    #----------------------#
+    # ----------------------#
 
     def handle_action(self, param):
         ret_val = phantom.APP_SUCCESS
@@ -339,10 +342,10 @@ class DevoConnector(BaseConnector):
         if isinstance(response, str):
             r_json = json.loads(response)
         for result in r_json["object"]:
-            item = self.devo_abhorrently_disgraceful_response_cleanup(result)
+            item = self.devo_response_cleanup(result)
             for k in item.keys():
                 if item[k] is not None and 0 < len(str(item[k]).strip()) and item[k] != "null":
-                    item[k] = self.devo_abhorrently_disgraceful_response_cleanup(item[k])
+                    item[k] = self.devo_response_cleanup(item[k])
             results.append(item)
 
         # Show number of returned results
@@ -361,38 +364,32 @@ class DevoConnector(BaseConnector):
         # Logging
         self.onpoll_log_add("Starting", f"{param}")
         self.audit_log_add(f"Starting on poll: {param}")
-        config = self.get_config()
-        action_id = self.get_action_identifier()
         action_result = self.add_action_result(ActionResult(dict(param)))
 
-        # Get asset configurations
-        label       = self.get_asset_label()
-        tags        = self.get_asset_tags()
-
         # Get action parameters
-        version         = self._on_poll_query_version
-        time_input      = self._on_poll_time_range
-        query           = self._on_poll_query
-        limit           = self._on_poll_result_limit
-        name_col        = self._on_poll_name_field
-        key_map         = self._on_poll_key_map
-        artifact_type   = self._on_poll_artifact_type
-        cef_list        = self.get_cef_list()
+        version = self._on_poll_query_version
+        time_input = self._on_poll_time_range
+        query = self._on_poll_query
+        limit = self._on_poll_result_limit
+        name_col = self._on_poll_name_field
+        key_map = self._on_poll_key_map
+        artifact_type = self._on_poll_artifact_type
+        cef_list = self.get_cef_list()
 
         # Get aggregation data
-        aggregate_enable    = self._aggregate_enable
-        aggregate_range     = self._aggregate_range
-        aggregate_closed    = self._aggregate_closed
-        aggregate_fields    = self._aggregate_fields
+        aggregate_enable = self._aggregate_enable
+        aggregate_range = self._aggregate_range
+        aggregate_closed = self._aggregate_closed
+        aggregate_fields = self._aggregate_fields
 
         # Initialize instance variables
-        artifact_count  = 0
+        artifact_count = 0
         container_count = 0
         duplicate_count = 0
         aggregate_count = 0
-        error_count     = 0
-        results_count   = 0
-        success_count   = 0
+        error_count = 0
+        results_count = 0
+        success_count = 0
 
         # Parse time input
         time_start, time_end = self.parse_time_input(time_input)
@@ -442,7 +439,7 @@ class DevoConnector(BaseConnector):
 
             # Loop through results
             for r, row in enumerate(results):
-                row = self.devo_abhorrently_disgraceful_response_cleanup(row)
+                row = self.devo_response_cleanup(row)
                 # Reset alert contents for each new row
                 alert = {}
 
@@ -467,31 +464,37 @@ class DevoConnector(BaseConnector):
                     # Name the container and associated alerts
                     alert_name: Any = str(alert.get(name_col, "Empty or no signature name column."))
                     # The eventdate recieved from Devo, usually internally aliased as "eventDate" but let us regex it just to futureproof it
-                    event_date: Any = str(alert.get("eventdate" if 0 == len(re.findall(r"eventdate as[^\w+]+([\w]+)\s*,?",query)) else re.findall(r"eventdate as[^\w+]+([\w]+)\s*,?",query)[0]))
+                    event_date: Any = str(alert.get(
+                        "eventdate" if 0 == len(re.findall(r"eventdate as[^\w+]+([\w]+)\s*,?", query)) else
+                        re.findall(r"eventdate as[^\w+]+([\w]+)\s*,?", query)[0]))
 
                     # Create Universally Unique Identifier if not already present
                     if "source_data_identifier" not in alert:
                         # The UUID here is calculated from the artifact dictionary hash
-                        alert['source_data_identifier'] = str(uuid.UUID(hex=self.dict_hash({"alert_name": alert_name, "event_date": event_date})))
-                        self.onpoll_log_add("processing", f"source_data_identifier created: {alert['source_data_identifier']}")
+                        alert['source_data_identifier'] = str(
+                            uuid.UUID(hex=self.dict_hash({"alert_name": alert_name, "event_date": event_date})))
+                        self.onpoll_log_add("processing",
+                                            f"source_data_identifier created: {alert['source_data_identifier']}")
                     else:
-                        self.onpoll_log_add("processing", f"source_data_identifier detected: {alert['source_data_identifier']}")
-                    
+                        self.onpoll_log_add("processing",
+                                            f"source_data_identifier detected: {alert['source_data_identifier']}")
+
                     # Check if this artifact already exists
                     params = f"?_filter_source_data_identifier=\"{urllib.parse.quote_plus(alert['source_data_identifier'])}\""
                     uri = phanrules.build_phantom_rest_url("artifact") + params
                     response = phanrules.requests.get(uri, verify=False)
-                    
+
                     if self._debug_print:
                         self.debug_print(uri)
-                        
-                    #response = phanrules.requests.get(uri, verify=self._verify_server_cert)
+
+                    # response = phanrules.requests.get(uri, verify=self._verify_server_cert)
                     if 200 == response.status_code:
                         if 0 < json.loads(response.text).get("count", 0):
                             # Lol it already exists, you foolish fool
                             duplicate_count += 1
                             if self._debug_print:
-                                self.debug_print(f"duplicate artifact: {json.loads(response.text).get('data')[0].get('container')}")
+                                self.debug_print(
+                                    f"duplicate artifact: {json.loads(response.text).get('data')[0].get('container')}")
                             # self.onpoll_log_add("processing", f"duplicate artifact: {json.loads(response.text).get('data')[0].get('container')}")
                             continue
                         else:
@@ -540,7 +543,8 @@ class DevoConnector(BaseConnector):
                                             continue
                                     # This is a valid target container ID, let's use it
                                     container_id = artifact['container']
-                                    self.onpoll_log_add("processing", f"Valid aggregation target container identified: {container_id}")
+                                    self.onpoll_log_add("processing",
+                                                        f"Valid aggregation target container identified: {container_id}")
                                     # Break the loop
                                     break
                                 else:
@@ -558,18 +562,18 @@ class DevoConnector(BaseConnector):
                     # Do the container things
                     if None != container_id:
                         artifact = {
-                            "name" : alert_name
-                            , "type" : artifact_type
-                            , "cef" : cef_values
-                            , "data" : alert
-                            , "label" : label
-                            , "tags" : tags
-                            , "severity" : "medium"
-                            , "hash" : re.sub(r"[^ABCDEFabcdef0123456789]", "", alert['source_data_identifier'])
-                            , "identifier" : alert['source_data_identifier']
-                            , "version" : version
-                            , "container_id" : container_id
-                            , "run_automation" : False
+                            "name": alert_name
+                            , "type": artifact_type
+                            , "cef": cef_values
+                            , "data": alert
+                            , "label": self.get_asset_label()
+                            , "tags": self.get_asset_tags()
+                            , "severity": "medium"
+                            , "hash": re.sub(r"[^ABCDEFabcdef0123456789]", "", alert['source_data_identifier'])
+                            , "identifier": alert['source_data_identifier']
+                            , "version": version
+                            , "container_id": container_id
+                            , "run_automation": False
                         }
                         success, message, artifact_id = self.save_artifact(artifact)
                         if isinstance(artifact_id, int):
@@ -578,8 +582,10 @@ class DevoConnector(BaseConnector):
                             aggregate_count += 1
                             artifact_count += 1
                             if self._debug_print:
-                                self.debug_print(f"Artifact ({alert['source_data_identifier']}) aggregated to container: {container_id}")
-                            self.onpoll_log_add("Success", f"Artifact ({alert['source_data_identifier']}) aggregated to container: {container_id}")
+                                self.debug_print(
+                                    f"Artifact ({alert['source_data_identifier']}) aggregated to container: {container_id}")
+                            self.onpoll_log_add("Success",
+                                                f"Artifact ({alert['source_data_identifier']}) aggregated to container: {container_id}")
                         else:
                             self.error_log_add(message)
                             error_count += 1
@@ -589,21 +595,21 @@ class DevoConnector(BaseConnector):
                         #   true so playbooks only run once against each container"
                         # This is what the documentation says SHOULD happen, but it doesn't seem to work as expected
                         container = {
-                            "name" : alert_name
-                            , "source_data_identifier" : f"{alert['source_data_identifier']}"
-                            , "label" : label
-                            , "tags" : tags
-                            , "run_automation" : False
-                            , "artifacts" : [{
-                                "name" : alert_name
-                                , "type" : artifact_type
-                                , "cef" : cef_values
-                                , "data" : alert
-                                , "label" : label
-                                , "tags" : tags
-                                , "hash" : re.sub(r"[^ABCDEFabcdef0123456789]", "", alert['source_data_identifier'])
-                                , "identifier" : alert['source_data_identifier']
-                                , "version" : version
+                            "name": alert_name
+                            , "source_data_identifier": f"{alert['source_data_identifier']}"
+                            , "label": self.get_asset_label()
+                            , "tags": self.get_asset_tags()
+                            , "run_automation": False
+                            , "artifacts": [{
+                                "name": alert_name
+                                , "type": artifact_type
+                                , "cef": cef_values
+                                , "data": alert
+                                , "label": self.get_asset_label()
+                                , "tags": self.get_asset_tags()
+                                , "hash": re.sub(r"[^ABCDEFabcdef0123456789]", "", alert['source_data_identifier'])
+                                , "identifier": alert['source_data_identifier']
+                                , "version": version
                             }]
                         }
 
@@ -624,7 +630,8 @@ class DevoConnector(BaseConnector):
                             error_count += 1
                             # Oh, how the turntables
                             self.error_log_add(msg)
-                            self.onpoll_log_add("Failed", f"Error while attempting to create new container with new artifact ({alert['source_data_identifier']}): {msg}")
+                            self.onpoll_log_add("Failed",
+                                                f"Error while attempting to create new container with new artifact ({alert['source_data_identifier']}): {msg}")
 
         # Save overall progress for statistical analysisenthesis
         self._state["last_run_results_count"] = results_count
@@ -636,13 +643,13 @@ class DevoConnector(BaseConnector):
         self._state["last_run_aggregate_count"] = aggregate_count
 
         action_result.update_summary({
-            "results_count":        results_count
-            , "success_count":      success_count
-            , "error_count":        error_count
-            , "container_count":    container_count
-            , "artifact_count":     artifact_count
-            , "duplicate_count":    duplicate_count
-            , "aggregate_count":    aggregate_count
+            "results_count": results_count
+            , "success_count": success_count
+            , "error_count": error_count
+            , "container_count": container_count
+            , "artifact_count": artifact_count
+            , "duplicate_count": duplicate_count
+            , "aggregate_count": aggregate_count
         })
 
         self.save_progress("Saving last run progress.")
@@ -678,21 +685,22 @@ class DevoConnector(BaseConnector):
             pass
         return phantom.APP_SUCCESS
 
-    #-----------------------#
+    # -----------------------#
     #   LOGGING FUNCTIONS   #
-    #-----------------------#
+    # -----------------------#
 
-    def audit_log_add(self, message, asset_name = None):
+    def audit_log_add(self, message, asset_name=None):
         if not self._decided_list_logging or not self._audit_log_logging:
             return None
-        
+
         try:
             success, message, decided_list = phanrules.get_list(list_name=asset_name)
         except:
             decided_list = []
         values = [
             datetime.datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S")
-            , f"{self.get_asset_name()} (ver. {self._on_poll_query_version})" if None == asset_name else "Initializing..."
+            ,
+            f"{self.get_asset_name()} (ver. {self._on_poll_query_version})" if None == asset_name else "Initializing..."
             , message
         ]
         decided_list.insert(0, values)
@@ -701,7 +709,7 @@ class DevoConnector(BaseConnector):
     def error_log_add(self, message):
         if not self._decided_list_logging or not self._error_log_loging:
             return None
-            
+
         try:
             success, message, ordered_list = phanrules.get_list(list_name=asset_name)
         except:
@@ -717,7 +725,7 @@ class DevoConnector(BaseConnector):
     def onpoll_log_add(self, status, message):
         if not self._decided_list_logging or not self._onpoll_log_loging:
             return None
-            
+
         try:
             success, message, ordered_list = phanrules.get_list(list_name=asset_name)
         except:
@@ -737,9 +745,9 @@ class DevoConnector(BaseConnector):
             self.debug_print(type(ordered_list))
         pass
 
-    #-------------------------#
+    # -------------------------#
     #   SOAR REST API CALLS   #
-    #-------------------------#
+    # -------------------------#
 
     def get_cef_list(self):
         # Make REST call to SOAR
@@ -759,7 +767,8 @@ class DevoConnector(BaseConnector):
     def get_asset_name(self):
         # Make REST call to SOAR
         uri = phanrules.build_phantom_rest_url("asset", self.get_asset_id())
-        return json.loads(phanrules.requests.get(uri, verify=self._verify_server_cert).text).get("name", "unnamed_asset")
+        return json.loads(phanrules.requests.get(uri, verify=self._verify_server_cert).text).get("name",
+                                                                                                 "unnamed_asset")
 
     def get_asset_tags(self):
         # Make REST call to SOAR
@@ -769,11 +778,14 @@ class DevoConnector(BaseConnector):
     def get_asset_label(self):
         # Make REST call to SOAR
         uri = phanrules.build_phantom_rest_url("asset", self.get_asset_id())
-        return json.loads(phanrules.requests.get(uri, verify=self._verify_server_cert).text).get("configuration", {}).get("ingest", {}).get("container_label", None)
+        return json.loads(phanrules.requests.get(uri, verify=self._verify_server_cert).text).get("configuration",
+                                                                                                 {}).get("ingest",
+                                                                                                         {}).get(
+            "container_label", None)
 
-    #------------------#
+    # ------------------#
     #   TIME PARSERS   #
-    #------------------#
+    # ------------------#
 
     def parse_time_input(self, time_input):
         # Parse input string to find timestamps and time increments
@@ -783,7 +795,7 @@ class DevoConnector(BaseConnector):
         # Validate correct input and correct mistakes or invalid inputs
         if 1 > len(matches):
             # Completely wrong input
-            matches = [("now",),(self._run_query_default_range,)]
+            matches = [("now",), (self._run_query_default_range,)]
         if 2 > len(matches):
             # Only one match
             if "now" not in matches[0]:
@@ -923,9 +935,9 @@ class DevoConnector(BaseConnector):
         t_stamp = t_sec.strftime("%Y-%m-%d %H:%M:%S")
         return t_stamp
 
-    #----------------------#
+    # ----------------------#
     #   HELPER FUNCTIONS   #
-    #----------------------#
+    # ----------------------#
 
     def dict_hash(self, dictionary):
         # Sort by key so {'a': 1, 'b': 2} is the same as {'b': 2, 'a': 1}
@@ -944,9 +956,9 @@ class DevoConnector(BaseConnector):
             output_list.remove("")
         return output_list
 
-    #---------------------#
+    # ---------------------#
     #   SOAR CONSTRUCTS   #
-    #---------------------#
+    # ---------------------#
 
     def initialize(self):
         # Load the state in initialize, use it to store data that needs to be accessed across actions
@@ -959,35 +971,35 @@ class DevoConnector(BaseConnector):
         self._verify_server_cert = config.get("verify_server_cert", False)
 
         # Log names
-        self._log_name_error        = config.get("log_name_error", "devoQueryIngest_ErrorLog")
-        self._log_name_audit        = config.get("log_name_audit", "devoQueryIngest_AuditLog")
-        self._log_name_on_poll      = config.get("log_name_on_poll", "devoQueryIngest_OnPollLog")
+        self._log_name_error = config.get("log_name_error", "devoQueryIngest_ErrorLog")
+        self._log_name_audit = config.get("log_name_audit", "devoQueryIngest_AuditLog")
+        self._log_name_on_poll = config.get("log_name_on_poll", "devoQueryIngest_OnPollLog")
 
         # run_query action default parameters
-        self._run_query_default_range   = config.get("run_query_default_range", "1w-now")
-        self._run_query_result_limit    = config.get("run_query_result_limit", 1000)
+        self._run_query_default_range = config.get("run_query_default_range", "1w-now")
+        self._run_query_result_limit = config.get("run_query_result_limit", 1000)
 
         # on_poll action default parameters
-        self._on_poll_query         = config.get("on_poll_query", "")
-        self._on_poll_time_range    = config.get("on_poll_time_range", "1d-now")
-        self._on_poll_result_limit  = config.get("on_poll_result_limit", 1000)
-        self._on_poll_name_field    = config.get("on_poll_name_field", "signature")
+        self._on_poll_query = config.get("on_poll_query", "")
+        self._on_poll_time_range = config.get("on_poll_time_range", "1d-now")
+        self._on_poll_result_limit = config.get("on_poll_result_limit", 1000)
+        self._on_poll_name_field = config.get("on_poll_name_field", "signature")
         self._on_poll_query_version = config.get("on_poll_query_version", 1)
         self._on_poll_artifact_type = config.get("on_poll_artifact_type", "host")
-        self._on_poll_key_map       = json.loads(config.get("on_poll_key_map", "{}"))
+        self._on_poll_key_map = json.loads(config.get("on_poll_key_map", "{}"))
 
         # Internal aggregation configuration
-        self._aggregate_enable      = config.get("aggregate_enable", False)
-        self._aggregate_closed      = config.get("aggregate_closed", False)
-        self._aggregate_fields      = self.field_list_from_string(config.get("aggregate_fields", "").strip())
-        self._aggregate_range       = self.parse_aggregate_range(config.get("aggregate_range", "1d").strip())
-    
+        self._aggregate_enable = config.get("aggregate_enable", False)
+        self._aggregate_closed = config.get("aggregate_closed", False)
+        self._aggregate_fields = self.field_list_from_string(config.get("aggregate_fields", "").strip())
+        self._aggregate_range = self.parse_aggregate_range(config.get("aggregate_range", "1d").strip())
+
         # Logging Enable
-        self._debug_print           = True
-        self._decided_list_logging  = False
-        self._audit_log_logging     = False
-        self._error_log_loging      = False
-        self._onpoll_log_loging     = False
+        self._debug_print = True
+        self._decided_list_logging = False
+        self._audit_log_logging = False
+        self._error_log_loging = False
+        self._onpoll_log_loging = False
         self.audit_log_add("Initializing...", self.get_asset_id())
 
         return phantom.APP_SUCCESS
@@ -996,6 +1008,7 @@ class DevoConnector(BaseConnector):
         # Save the state, this data is saved across actions and app upgrades
         self.save_state(self._state)
         return phantom.APP_SUCCESS
+
 
 def main():
     import argparse
@@ -1013,7 +1026,6 @@ def main():
     password = args.password
 
     if username is not None and password is None:
-
         # User specified a username but not a password, so ask
         import getpass
         password = getpass.getpass("Password: ")
@@ -1058,6 +1070,7 @@ def main():
         print(json.dumps(json.loads(ret_val), indent=4))
 
     exit(0)
+
 
 if __name__ == '__main__':
     main()

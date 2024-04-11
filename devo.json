@@ -1,378 +1,348 @@
 {
-   "appid":"a5932a03-4ddc-4a08-9316-6a0ad98f519e",
-   "name":"Devo Query and Ingest",
-   "description":"App for Devo API integration for alert querying and ingestion.",
-   "type":"siem",
-   "product_vendor":"Devo",
-   "logo":"logo.svg",
-   "logo_dark":"logo_dark.svg",
-   "product_name":"Devo",
-   "python_version":"3",
-   "product_version_regex":".*",
-   "publisher":"Supernawesome, L.L.C.",
-   "fips_compliant":true,
-   "license":"GNU General Public License v3",
-   "app_version":"2.0.6",
-   "utctime_updated":"2023-03-03T15:12:54.000000Z",
-   "package_name":"phantom_devo",
-   "main_module":"devo_connector.py",
-   "min_phantom_version":"5.2.1.78411",
-   "app_wizard_version":"1.0.0",
-   "configuration":{
-      "base_url":{
-         "description":"Base url of target Devo server providing API services.",
-         "data_type":"string",
-         "required":true,
-         "value_list":[
-            
-         ],
-         "default":"",
-         "order":0,
-         "name":"base_url",
-         "id":0
+  "appid": "a5932a03-4ddc-4a08-9316-6a0ad98f519e",
+  "name": "Devo Query and Ingest",
+  "description": "App for Devo API integration for alert querying and data ingestion.",
+  "type": "siem",
+  "product_vendor": "Devo",
+  "logo": "logo.svg",
+  "logo_dark": "logo_dark.svg",
+  "product_name": "Devo",
+  "python_version": "3",
+  "product_version_regex": ".*",
+  "publisher": "Supernawesome, L.L.C.",
+  "fips_compliant": true,
+  "license": "GNU General Public License v3",
+  "app_version": "2.0.7",
+  "utctime_updated": "2023-03-03T15:12:54.000000Z",
+  "package_name": "phantom_devo",
+  "main_module": "devo_connector.py",
+  "min_phantom_version": "5.2.1.78411",
+  "app_wizard_version": "1.0.0",
+  "configuration": {
+    "base_url": {
+      "description": "Base url of target Devo server providing API services.",
+      "data_type": "string",
+      "required": true,
+      "value_list": [
+      ],
+      "default": "",
+      "order": 0,
+      "name": "base_url",
+      "id": 0
+    },
+    "api_token": {
+      "description": "Authorized API token for API calls.",
+      "data_type": "string",
+      "required": true,
+      "value_list": [
+      ],
+      "default": "",
+      "order": 1,
+      "name": "api_token",
+      "id": 1
+    },
+    "on_poll_query": {
+      "description": "Query: Query to call for on_poll action.",
+      "data_type": "string",
+      "required": true,
+      "value_list": [
+      ],
+      "default": "",
+      "order": 2,
+      "name": "on_poll_query",
+      "id": 2
+    },
+    "on_poll_time_range": {
+      "description": "Time Range: Default time range for on_poll action (default: 1d-now).",
+      "data_type": "string",
+      "required": false,
+      "value_list": [
+      ],
+      "default": "1d-now",
+      "order": 3,
+      "name": "on_poll_time_range",
+      "id": 3
+    },
+    "on_poll_result_limit": {
+      "description": "Limit: Result limit for on_poll action.",
+      "data_type": "numeric",
+      "required": true,
+      "value_list": [
+      ],
+      "default": 1000,
+      "order": 4,
+      "name": "on_poll_result_limit",
+      "id": 4
+    },
+    "on_poll_name_field": {
+      "description": "Name Field: Field name to apply as the container's name.",
+      "data_type": "string",
+      "required": true,
+      "value_list": [
+      ],
+      "default": "signature",
+      "order": 5,
+      "name": "on_poll_name_field",
+      "id": 5
+    },
+    "on_poll_query_version": {
+      "description": "Version: Query version number, added as artifact for change-tracking purposes.",
+      "data_type": "numeric",
+      "required": true,
+      "value_list": [
+      ],
+      "default": "1",
+      "order": 6,
+      "name": "on_poll_query_version",
+      "id": 6
+    },
+    "on_poll_artifact_type": {
+      "description": "Artifact Type: What type of artifact to be ingested from asset.",
+      "data_type": "string",
+      "required": true,
+      "value_list": [
+        "host",
+        "network"
+      ],
+      "default": "host",
+      "order": 7,
+      "name": "on_poll_artifact_type",
+      "id": 7
+    },
+    "verify_server_cert": {
+      "description": "Verify Server Certificate: Safety first.",
+      "data_type": "boolean",
+      "required": false,
+      "primary": false,
+      "contains": [
+      ],
+      "default": false,
+      "order": 8,
+      "name": "verify_server_cert",
+      "id": 8
+    },
+    "on_poll_key_map": {
+      "description": "Key Map: A JSON string of {'old_column_name':'new_column_name'} for on-the-fly column renaming",
+      "data_type": "string",
+      "required": false,
+      "value_list": [
+      ],
+      "default": "",
+      "order": 9,
+      "name": "on_poll_key_map",
+      "id": 9
+    },
+    "aggregate_enable": {
+      "description": "Aggregation: Enable internal aggregation on ingest.",
+      "data_type": "boolean",
+      "required": false,
+      "primary": false,
+      "contains": [
+      ],
+      "default": true,
+      "order": 10,
+      "name": "aggregate_enable",
+      "id": 10
+    },
+    "aggregate_fields": {
+      "description": "Aggregation Fields: List of field names to aggregate on separated by commas (blank/default: SOAR configured CEFs)",
+      "data_type": "string",
+      "required": false,
+      "primary": false,
+      "contains": [
+      ],
+      "default": "",
+      "order": 11,
+      "name": "aggregate_fields",
+      "id": 11
+    },
+    "aggregate_closed": {
+      "description": "Aggregate Closed: Enable aggregation of ingested artifacts into closed events or cases within the defined time range (default: false)",
+      "data_type": "boolean",
+      "required": false,
+      "primary": false,
+      "contains": [
+      ],
+      "default": false,
+      "order": 12,
+      "name": "aggregate_closed",
+      "id": 12
+    },
+    "aggregate_time_range": {
+      "description": "Aggregate Time Range: Default time range for on_poll action (default: 1d)",
+      "data_type": "string",
+      "required": false,
+      "value_list": [
+      ],
+      "default": "1d",
+      "order": 13,
+      "name": "aggregate_range",
+      "id": 13
+    }
+  },
+  "actions": [
+    {
+      "action": "test connectivity",
+      "identifier": "test_connectivity",
+      "description": "Test asset configuration.",
+      "verbose": "Validate the asset configuration for connectivity using supplied configuration.",
+      "type": "test",
+      "read_only": true,
+      "parameters": {
       },
-      "api_token":{
-         "description":"Authorized API token for API calls.",
-         "data_type":"string",
-         "required":true,
-         "value_list":[
-            
-         ],
-         "default":"",
-         "order":1,
-         "name":"api_token",
-         "id":1
+      "output": [
+      ],
+      "versions": "EQ(*)"
+    },
+    {
+      "action": "crop logs",
+      "identifier": "crop_logs",
+      "description": "Crop Logs",
+      "verbose": "",
+      "type": "test",
+      "read_only": true,
+      "parameters": {
+        "time_input": {
+          "description": "Time range to crop to (e.g. 1d trims all entries older than 1d)",
+          "data_type": "string",
+          "required": false,
+          "primary": false,
+          "contains": [
+          ],
+          "value_list": [
+          ],
+          "default": "1d",
+          "order": 0,
+          "name": "time_input"
+        }
       },
-      "on_poll_query":{
-         "description":"Query: Query to call for on_poll action.",
-         "data_type":"string",
-         "required":true,
-         "value_list":[
-            
-         ],
-         "default":"",
-         "order":2,
-         "name":"on_poll_query",
-         "id":2
+      "output": [
+      ],
+      "render": {
+        "type": "table"
       },
-      "on_poll_time_range":{
-         "description":"Time Range: Default time range for on_poll action (default: 1d-now).",
-         "data_type":"string",
-         "required":false,
-         "value_list":[
-            
-         ],
-         "default":"1d-now",
-         "order":3,
-         "name":"on_poll_time_range",
-         "id":3
+      "versions": "EQ(*)"
+    },
+    {
+      "action": "run query",
+      "identifier": "run_query",
+      "description": "Run a query against the Devo",
+      "verbose": "Run a customized query against the Devo SIEM.",
+      "type": "ingest",
+      "read_only": false,
+      "parameters": {
+        "query": {
+          "description": "Full text of query to send.",
+          "data_type": "string",
+          "required": true,
+          "primary": false,
+          "contains": [
+          ],
+          "value_list": [
+          ],
+          "default": "from siem.logtrust.alert.info select *",
+          "order": 0,
+          "name": "query"
+        },
+        "time_input": {
+          "description": "Time range in which to limit query; accepts full datetimes and abbreviations (e.g. 1b-now; 1w; 12h; 2022-09-12 12:34:56 + 7d; etc. [y=year, b=month, w=week, d=day, h=hour, m=min, s=sec]).",
+          "data_type": "string",
+          "required": false,
+          "primary": false,
+          "contains": [
+          ],
+          "value_list": [
+          ],
+          "default": "2w-now",
+          "order": 1,
+          "name": "time_input"
+        },
+        "result_limit": {
+          "description": "Maximum number of results returned from the query (default 1000 or asset query_result_limit, whichever is lower).",
+          "data_type": "numeric",
+          "required": false,
+          "primary": false,
+          "contains": [
+          ],
+          "value_list": [
+          ],
+          "default": 1000,
+          "order": 2,
+          "name": "result_limit"
+        }
       },
-      "on_poll_result_limit":{
-         "description":"Limit: Result limit for on_poll action.",
-         "data_type":"numeric",
-         "required":true,
-         "value_list":[
-            
-         ],
-         "default":1000,
-         "order":4,
-         "name":"on_poll_result_limit",
-         "id":4
+      "output": [
+        {
+          "data_path": "action_result.parameter.type",
+          "data_type": "string",
+          "contains": [
+          ],
+          "column_name": "type",
+          "column_order": 0
+        },
+        {
+          "data_path": "action_result.data.*",
+          "data_type": "string",
+          "contains": [
+          ]
+        },
+        {
+          "data_path": "action_result.parameter.query",
+          "data_type": "string",
+          "contains": [
+          ],
+          "column_name": "query",
+          "column_order": 1
+        },
+        {
+          "data_path": "action_result.parameter.range",
+          "data_type": "string",
+          "contains": [
+          ],
+          "column_name": "range",
+          "column_order": 2
+        },
+        {
+          "data_path": "action_result.status",
+          "data_type": "string",
+          "column_name": "status",
+          "column_order": 3
+        },
+        {
+          "data_path": "action_result.message",
+          "data_type": "string"
+        },
+        {
+          "data_path": "summary.total_objects",
+          "data_type": "numeric"
+        },
+        {
+          "data_path": "summary.total_objects_successful",
+          "data_type": "numeric"
+        }
+      ],
+      "render": {
+        "type": "table"
       },
-      "on_poll_name_field":{
-         "description":"Name Field: Field name to apply as the container's name.",
-         "data_type":"string",
-         "required":true,
-         "value_list":[
-            
-         ],
-         "default":"signature",
-         "order":5,
-         "name":"on_poll_name_field",
-         "id":5
+      "versions": "EQ(*)"
+    },
+    {
+      "action": "on poll",
+      "identifier": "on_poll",
+      "description": "Testing On Poll",
+      "verbose": "",
+      "type": "ingest",
+      "read_only": true,
+      "parameters": {
       },
-      "on_poll_query_version":{
-         "description":"Version: Query version number, added as artifact for change-tracking purposes.",
-         "data_type":"numeric",
-         "required":true,
-         "value_list":[
-            
-         ],
-         "default":"1",
-         "order":6,
-         "name":"on_poll_query_version",
-         "id":6
-      },
-      "on_poll_artifact_type":{
-         "description":"Artifact Type: What type of artifact to be ingested from asset.",
-         "data_type":"string",
-         "required":true,
-         "value_list":[
-            "host",
-            "network"
-         ],
-         "default":"host",
-         "order":7,
-         "name":"on_poll_artifact_type",
-         "id":7
-      },
-      "verify_server_cert":{
-         "description":"Verify Server Certificate: Safety first.",
-         "data_type":"boolean",
-         "required":false,
-         "primary":false,
-         "contains":[
-            
-         ],
-         "default":false,
-         "order":8,
-         "name":"verify_server_cert",
-         "id":8
-      },
-      "on_poll_key_map":{
-         "description":"Key Map: A JSON string of {'old_column_name':'new_column_name'} for on-the-fly column renaming",
-         "data_type":"string",
-         "required":false,
-         "value_list":[
-            
-         ],
-         "default":"",
-         "order":9,
-         "name":"on_poll_key_map",
-         "id":9
-      },
-      "aggregate_enable":{
-         "description":"Aggregation: Enable internal aggregation on ingest.",
-         "data_type":"boolean",
-         "required":false,
-         "primary":false,
-         "contains":[
-            
-         ],
-         "default":true,
-         "order":10,
-         "name":"aggregate_enable",
-         "id":10
-      },
-      "aggregate_fields":{
-         "description":"Aggregation Fields: List of field names to aggregate on separated by commas (blank/default: SOAR configured CEFs)",
-         "data_type":"string",
-         "required":false,
-         "primary":false,
-         "contains":[
-            
-         ],
-         "default":"",
-         "order":11,
-         "name":"aggregate_fields",
-         "id":11
-      },
-      "aggregate_closed":{
-         "description":"Aggregate Closed: Enable aggregation of ingested artifacts into closed events or cases within the defined time range (default: false)",
-         "data_type":"boolean",
-         "required":false,
-         "primary":false,
-         "contains":[
-            
-         ],
-         "default":false,
-         "order":12,
-         "name":"aggregate_closed",
-         "id":12
-      },
-      "aggregate_time_range":{
-         "description":"Aggregate Time Range: Default time range for on_poll action (default: 1d)",
-         "data_type":"string",
-         "required":false,
-         "value_list":[
-            
-         ],
-         "default":"1d",
-         "order":13,
-         "name":"aggregate_range",
-         "id":13
-      }
-   },
-   "actions":[
-      {
-         "action":"test connectivity",
-         "identifier":"test_connectivity",
-         "description":"Test asset configuration.",
-         "verbose":"Validate the asset configuration for connectivity using supplied configuration.",
-         "type":"test",
-         "read_only":true,
-         "parameters":{
-            
-         },
-         "output":[
-            
-         ],
-         "versions":"EQ(*)"
-      },
-      {
-         "action":"crop logs",
-         "identifier":"crop_logs",
-         "description":"Crop Logs",
-         "verbose":"",
-         "type":"test",
-         "read_only":true,
-         "parameters":{
-            "time_input":{
-               "description":"Time range to crop to (e.g. 1d trims all entries older than 1d)",
-               "data_type":"string",
-               "required":false,
-               "primary":false,
-               "contains":[
-                  
-               ],
-               "value_list":[
-                  
-               ],
-               "default":"1d",
-               "order":0,
-               "name":"time_input"
-            }
-         },
-         "output":[
-            
-         ],
-         "render":{
-            "type":"table"
-         },
-         "versions":"EQ(*)"
-      },
-      {
-         "action":"run query",
-         "identifier":"run_query",
-         "description":"Run a query against the Devo",
-         "verbose":"Run a customized query against the Devo SIEM.",
-         "type":"ingest",
-         "read_only":false,
-         "parameters":{
-            "query":{
-               "description":"Full text of query to send.",
-               "data_type":"string",
-               "required":true,
-               "primary":false,
-               "contains":[
-                  
-               ],
-               "value_list":[
-                  
-               ],
-               "default":"from siem.logtrust.alert.info select *",
-               "order":0,
-               "name":"query"
-            },
-            "time_input":{
-               "description":"Time range in which to limit query; accepts full datetimes and abbreviations (e.g. 1b-now; 1w; 12h; 2022-09-12 12:34:56 + 7d; etc. [y=year, b=month, w=week, d=day, h=hour, m=min, s=sec]).",
-               "data_type":"string",
-               "required":false,
-               "primary":false,
-               "contains":[
-                  
-               ],
-               "value_list":[
-                  
-               ],
-               "default":"2w-now",
-               "order":1,
-               "name":"time_input"
-            },
-            "result_limit":{
-               "description":"Maximum number of results returned from the query (default 1000 or asset query_result_limit, whichever is lower).",
-               "data_type":"numeric",
-               "required":false,
-               "primary":false,
-               "contains":[
-                  
-               ],
-               "value_list":[
-                  
-               ],
-               "default":1000,
-               "order":2,
-               "name":"result_limit"
-            }
-         },
-         "output":[
-            {
-               "data_path":"action_result.parameter.type",
-               "data_type":"string",
-               "contains":[
-                  
-               ],
-               "column_name":"type",
-               "column_order":0
-            },
-            {
-               "data_path":"action_result.data.*",
-               "data_type":"string",
-               "contains":[
-                  
-               ]
-            },
-            {
-               "data_path":"action_result.parameter.query",
-               "data_type":"string",
-               "contains":[
-                  
-               ],
-               "column_name":"query",
-               "column_order":1
-            },
-            {
-               "data_path":"action_result.parameter.range",
-               "data_type":"string",
-               "contains":[
-                  
-               ],
-               "column_name":"range",
-               "column_order":2
-            },
-            {
-               "data_path":"action_result.status",
-               "data_type":"string",
-               "column_name":"status",
-               "column_order":3
-            },
-            {
-               "data_path":"action_result.message",
-               "data_type":"string"
-            },
-            {
-               "data_path":"summary.total_objects",
-               "data_type":"numeric"
-            },
-            {
-               "data_path":"summary.total_objects_successful",
-               "data_type":"numeric"
-            }
-         ],
-         "render":{
-            "type":"table"
-         },
-         "versions":"EQ(*)"
-      },
-      {
-         "action":"on poll",
-         "identifier":"on_poll",
-         "description":"Testing On Poll",
-         "verbose":"",
-         "type":"ingest",
-         "read_only":true,
-         "parameters":{
-            
-         },
-         "output":[
-            
-         ],
-         "versions":"EQ(*)"
-      }
-   ],
-   "directory":"devoqueryandingest_a5932a03-4ddc-4a08-9316-6a0ad98f519e",
-   "version":1,
-   "appname":"-",
-   "executable":"spawn3",
-   "disabled":false
+      "output": [
+      ],
+      "versions": "EQ(*)"
+    }
+  ],
+  "directory": "devoqueryandingest_a5932a03-4ddc-4a08-9316-6a0ad98f519e",
+  "version": 1,
+  "appname": "-",
+  "executable": "spawn3",
+  "disabled": false
 }
