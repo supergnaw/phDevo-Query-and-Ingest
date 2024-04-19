@@ -12,7 +12,7 @@
   "publisher": "Supernawesome, L.L.C.",
   "fips_compliant": true,
   "license": "GNU General Public License v3",
-  "app_version": "2.0.7",
+  "app_version": "2.1.2",
   "utctime_updated": "2023-03-03T15:12:54.000000Z",
   "package_name": "phantom_devo",
   "main_module": "devo_connector.py",
@@ -91,7 +91,7 @@
       "required": true,
       "value_list": [
       ],
-      "default": "1",
+      "default": 1,
       "order": 6,
       "name": "on_poll_query_version",
       "id": 6
@@ -156,7 +156,8 @@
       "name": "aggregate_fields",
       "id": 11
     },
-    "aggregate_closed": {
+    "aggregate_closed":
+    {
       "description": "Aggregate Closed: Enable aggregation of ingested artifacts into closed events or cases within the defined time range (default: false)",
       "data_type": "boolean",
       "required": false,
@@ -332,6 +333,19 @@
       "description": "Testing On Poll",
       "verbose": "",
       "type": "ingest",
+      "read_only": true,
+      "parameters": {
+      },
+      "output": [
+      ],
+      "versions": "EQ(*)"
+    },
+    {
+      "action": "app test",
+      "identifier": "app_test",
+      "description": "Testing Application class functions",
+      "verbose": "",
+      "type": "test",
       "read_only": true,
       "parameters": {
       },

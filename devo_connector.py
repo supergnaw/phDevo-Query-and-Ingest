@@ -3,7 +3,7 @@
 # -----------------------------------------
 # Phantom sample App Connector python file
 # -----------------------------------------
-# Version 2.0.7
+# Version 2.1.2
 # -----------------------------------------
 
 # Python 3 Compatibility imports
@@ -25,7 +25,6 @@ from bs4 import BeautifulSoup
 from bs4 import UnicodeDammit
 import re
 import time
-import datetime
 import urllib
 import ipaddress
 import datetime
@@ -34,46 +33,139 @@ import datetime
 import hashlib
 import uuid
 
+import epochrangeparser
+
 
 class RetVal(tuple):
 
     def __new__(cls, val1, val2=None):
         return tuple.__new__(RetVal, (val1, val2))
 
+
+class SettingsParser:
+    def __init__(self, settings: dict, defaults: dict):
+        for key, default in defaults.items():
+            value = self.parse_setting_type(settings.get(key, default), default)
+            setattr(self, key, value)
+
+        print(f"SettingsParser: {self.values}")
+
+    def parse_setting_type(self, value, default):
+        if isinstance(default, str):
+            return str(value).strip() if value else default
+
+        if isinstance(default, int):
+            return int(value) if value else default
+
+        if isinstance(default, bool):
+            return bool(value) if value else default
+
+        if isinstance(default, dict):
+            if isinstance(value, str):
+                try:
+                    return json.loads(value)
+                except:
+                    value = value.strip()
+            return value if 0 < len(value) else default
+
+        if isinstance(default, list):
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except:
+                    output_list = re.split(r"\s*,\s*", value)
+                    while ("" in output_list): output_list.remove("")
+                    value = output_list
+            return value if 0 < len(value) else default
+
+        return value
+
+    @property
+    def values(self) -> dict:
+        return {k: v for k, v in self.__dict__.items() if not k.startswith('__') and not callable(k)}
+
+
 class DevoConnector(BaseConnector):
 
     @property
     def app_id(self) -> str:
-        return str(self.get_app_json().get('appid', 'Unknown ID'))
+        if not self._app_id:
+            self._app_id = str(self.get_app_json().get("appid", 'unknown app id'))
+        return self._app_id
+    _app_id: str = None
 
     @property
     def app_version(self) -> str:
-        return str(self.get_app_json().get('app_version', '0.0.0'))
+        if not self._app_version:
+            self._app_version = str(self.get_app_json().get("app_version", '0.0.0'))
+        return self._app_version
+    _app_version: str = None
 
     @property
     def asset_id(self) -> str:
-        return str(self.get_asset_id())
+        if not self._asset_id:
+            self._asset_id = str(self.get_asset_id())
+        return self._asset_id
+    _asset_id: str = None
+
+    @property
+    def asset_name(self) -> str:
+        if not self._asset_name:
+            self._asset_name = phantom.requests.get(
+                    phanrules.build_phantom_rest_url("asset", self.asset_id),
+                    verify=self.config.verify_server_cert
+                ).json.get("name", 'unnamed_asset')
+        return self._asset_name
+    _asset_name: str = None
+
+    @property
+    def label(self) -> str:
+        if not self._label:
+            self._label = phantom.requests.get(
+                    phanrules.build_phantom_rest_url("asset", self.asset_id),
+                    verify=self.config.verify_server_cert
+                ).json.get("configuration", {}).get("ingest", {}).get("container_label", 'events')
+        return self._label
+    _label: str = None
+
+    @property
+    def tags(self) -> list:
+        if not self._tags:
+            self._tags = phantom.requests.get(
+                    phanrules.build_phantom_rest_url("asset", self.asset_id),
+                    verify=self.config.verify_server_cert
+                ).json.get("tags", [])
+        return self._tags
+    _tags: list = None
 
     @property
     def action_id(self) -> str:
-        return str(self.get_action_identifier())
+        if not self._action_id:
+            self._action_id = str(self.get_action_identifier())
+        return self._action_id
+    _action_id: str = None
+
+    @property
+    def cef_list(self) -> list:
+        if not self._cef_list:
+            response = phantom.requests.get(
+                    phanrules.build_phantom_rest_url("cef") + "?page_size=0",
+                    verify=self.config.verify_server_cert
+                ).json.get("data", [])
+            self._cef_list = [cef['name'] for cef in response]
+        return self._cef_list
+    _cef_list: list = None
 
     def __init__(self):
 
         # Call the BaseConnectors init first
         super(DevoConnector, self).__init__()
 
-        self._params = None
-        self._aggregate_fields = None
-        self._state = None
-
-        # Variable to hold a base_url in case the app makes REST calls
-        # Do note that the app json defines the asset config, so please
-        # modify this as you deem fit.
-        self._base_url = None
-        self._api_token = None
-        self._ingest_table = None
-        self._ingest_range = None
+        self.state = None
+        self.config = {}
+        self.params = {}
+        self.response = None
+        self.response_json = None
 
     # ----------------------------------#
     #   CONNECTOR REST CALL FUNCTIONS   #
@@ -97,9 +189,9 @@ class DevoConnector(BaseConnector):
 
         try:
             r = request_func(
-                self._base_url + endpoint
+                self.config.base_url + endpoint
                 # , auth=(username, password),  # basic authentication
-                , verify=self._verify_server_cert
+                , verify=self.config.verify_server_cert
                 , **kwargs
             )
         except Exception as e:
@@ -113,7 +205,7 @@ class DevoConnector(BaseConnector):
         return self._process_response(r, action_result)
 
     # ----------------------#
-    #   RESPONSE PARSERS   #
+    #   RESPONSE PARSERS    #
     # ----------------------#
 
     def _process_response(self, r, action_result):
@@ -200,21 +292,21 @@ class DevoConnector(BaseConnector):
             # we don't want the app to crash, so gracefully pass empty results instead
             return RetVal(phantom.APP_SUCCESS, {"object": []})
 
-    def devo_response_cleanup(self, data):
+    def _devo_response_cleanup(self, data):
         # Devo responses are kinda dirty, so let's do some cleanup
         if isinstance(data, dict):
             for key, val in data.items():
                 # Recursive is the only way to travel!
-                if val is not "null" and val != None:
+                if val and "null" != val:
                     # Enhance!
                     val = self._response_cleanup_helper(key, val)
-                    data[key] = self.devo_response_cleanup(val)
+                    data[key] = self._devo_response_cleanup(val)
         elif isinstance(data, str) and data != "null":
             try:
                 # Sure, it SAYS it's a string, but is it actually a JSON in disguise?
                 data = json.loads(data)
                 # THE AUDACITY!
-                return self.devo_response_cleanup(data)
+                return self._devo_response_cleanup(data)
             except:
                 # Oopsies, it's not a valid json... Enhance!
                 # Whitespace is bad
@@ -279,25 +371,24 @@ class DevoConnector(BaseConnector):
     #   ACTION FUNCTIONS   #
     # ---------------------#
 
-    def handle_action(self, param) -> bool:
-        self.param = param
-        self.save_progress(f"Starting action: {self.action_id}\n{json.dumps(self.param, indent=4)}")
+    def handle_action(self, params: dict = {}) -> bool:
+        self.save_progress(f"Starting action: {self.action_id}\n{json.dumps(params, indent=4)}")
 
-        if not getattr(self, f"_handle_{self.action_id}")() and self.r_json:
-            self.save_progstat(phantom.APP_ERROR, f"{self.action_id} has no _handler function")
+        if not getattr(self, f"_handle_{self.action_id}")(params):
+            self.save_progress(f"{self.action_id} has no _handler function")
+            return phantom.APP_ERROR
 
         return self.get_status()
 
-    def _handle_test_connectivity(self, param):
-        # Add an action result object to self (BaseConnector) to represent the action for this param
-        action_result = self.add_action_result(ActionResult(dict(param)))
+    def _handle_test_connectivity(self, params: dict={}) -> bool:
+        # set action parameters
+        self.params = SettingsParser(settings=params, defaults={})
+        self.save_progress(f"Using params: \n{json.dumps(self.params.values, indent=4)}")
 
-        # NOTE: test connectivity does _NOT_ take any parameters
-        # i.e. the param dictionary passed to this handler will be empty.
-        # Also typically it does not add any data into an action_result either.
-        # The status and progress messages are more important.
+        action_result = self.add_action_result(ActionResult(self.params.values))
 
         self.save_progress("Connecting to endpoint")
+
         # make rest call
         ret_val, response = self._make_rest_call(
             "/system/ping", action_result, method="get", params=None, headers=None
@@ -305,8 +396,6 @@ class DevoConnector(BaseConnector):
 
         # Process a Devo "ping"
         if phantom.is_fail(ret_val):
-            # the call to the 3rd party device or service failed, action result should contain all the error details
-            # for now the return is commented out, but after implementation, return from here
             self.save_progress("Test Connectivity Failed.")
             return action_result.get_status()
 
@@ -314,390 +403,230 @@ class DevoConnector(BaseConnector):
         self.save_progress("Test Connectivity Passed")
         return action_result.set_status(phantom.APP_SUCCESS)
 
-    def _handle_run_query(self, param):
-        action_id = self.get_action_identifier()
-        self.save_progress(f"Executing query against Devo server: {action_id}")
-        action_result = self.add_action_result(ActionResult(dict(param)))
+    def _handle_run_query(self, params: dict={}) -> bool:
+        # set action parameters
+        default_params = {
+            "query": "",
+            "time_input": self.config.run_query_default_range,
+            "result_limit": self.config.run_query_result_limit,
+            "query_endpoint": self.config.run_query_endpoint
+        }
+        self.params = SettingsParser(settings=params, defaults=default_params)
+        self.save_progress(f"Using params: \n{json.dumps(self.params.values, indent=4)}")
 
-        time_input = param.get("time_input", self._run_query_default_range)
-        limit = param.get("result_limit", self._run_query_result_limit)
+        action_result = self.add_action_result(ActionResult(self.params.values))
 
-        time_start, time_end = self.parse_time_input(time_input)
+        from_time, to_time = epochrangeparser.parse_range(self.params.time_input)
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": "Bearer " + self._api_token
+            "Authorization": "Bearer " + self.config.api_token
         }
 
         data = json.dumps({
-            "limit": limit
-            , "query": param["query"]
-            , "from": time_start
-            , "to": time_end
-            , "mode": {
-                "type": "json"
-            }
+            "limit": self.params.limit,
+            "query": self.params.query,
+            "from": from_time,
+            "to": to_time,
+            "mode": {"type": "json"}
         })
 
         ret_val, response = self._make_rest_call(
-            '/lt-api/v2/search/query', action_result, method="post", params=None, headers=headers, data=data
+            self.params.query_endpoint, action_result, method="post", params=None, headers=headers, data=data
         )
 
-        # Parse results
+        # Parse and clean up results
         results = []
         r_json = response
         if isinstance(response, str):
             r_json = json.loads(response)
         for result in r_json["object"]:
-            item = self.devo_response_cleanup(result)
+            item = self._devo_response_cleanup(result)
             for k in item.keys():
                 if item[k] is not None and 0 < len(str(item[k]).strip()) and item[k] != "null":
-                    item[k] = self.devo_response_cleanup(item[k])
+                    item[k] = self._devo_response_cleanup(item[k])
             results.append(item)
 
         # Show number of returned results
-        if self._debug_print:
+        if self.config.debug_print:
             self.debug_print(f"Returned {len(results)} results.")
 
         # Add the response into the data section to spit out at the end of the run
         action_result.add_data(results)
-        # Add a dictionary that is made up of the most important values from teh data into the summary
+
         summary = action_result.update_summary({})
         summary['result_count'] = len(results)
 
         return action_result.set_status(phantom.APP_SUCCESS)
 
-    def _handle_on_poll(self, param):
-        # Logging
-        self.onpoll_log_add("Starting", f"{param}")
-        self.audit_log_add(f"Starting on poll: {param}")
-        action_result = self.add_action_result(ActionResult(dict(param)))
+    def _handle_crop_logs(self, params: dict={}) -> bool:
+        for log in [self.config.log_name_audit, self.config.log_name_error, self.config.log_name_on_poll]:
+            pass
+        return phantom.APP_SUCCESS
 
-        # Get action parameters
-        version = self._on_poll_query_version
-        time_input = self._on_poll_time_range
-        query = self._on_poll_query
-        limit = self._on_poll_result_limit
-        name_col = self._on_poll_name_field
-        key_map = self._on_poll_key_map
-        artifact_type = self._on_poll_artifact_type
-        cef_list = self.get_cef_list()
+    def _handle_on_poll(self, params: dict={}) -> bool:
+        # Set action parameters
+        self.params = SettingsParser(settings=params, defaults={})
 
-        # Get aggregation data
-        aggregate_enable = self._aggregate_enable
-        aggregate_range = self._aggregate_range
-        aggregate_closed = self._aggregate_closed
-        aggregate_fields = self._aggregate_fields
+        action_result = self.add_action_result(ActionResult(self.params.values))
 
-        # Initialize instance variables
-        artifact_count = 0
-        container_count = 0
-        duplicate_count = 0
-        aggregate_count = 0
-        error_count = 0
-        results_count = 0
-        success_count = 0
+        time_from, time_to = epochrangeparser.parse_range(self.config.on_poll_time_range)  # Parse time input
 
-        # Parse time input
-        time_start, time_end = self.parse_time_input(time_input)
-
-        # Create REST call headers and data globs
-        h = {
+        # REST call headers and data globs
+        headers = {
             "Content-Type": "application/json",
-            "Authorization": "Bearer " + self._api_token
+            "Authorization": "Bearer " + self.config.api_token
         }
 
-        d = json.dumps({
-            "limit": limit
-            , "query": query
-            , "from": time_start
-            , "to": time_end
-            , "mode": {
+        data = json.dumps({
+            "limit": self.config.on_poll_result_limit,
+            "query": self.config.on_poll_query,
+            "from": time_from,
+            "to": time_to,
+            "mode": {
                 "type": "json"
             }
         })
 
         # Run the query
         ret_val, response = self._make_rest_call(
-            '/lt-api/v2/search/query', action_result, params=None, headers=h, data=d, method="post"
+            '/lt-api/v2/search/query', action_result, params=None, headers=headers, data=data, method="post"
         )
-        self.audit_log_add(f"API REST call completed")
 
-        # Veryfiy query was ran successfully
-        if True != ret_val:
-            # Clean up any response
-            clean_text = re.sub(r"\s+", " ", re.sub(r"<.*?>", "", response.text.replace("\n", "")))
-            # Make a pretty error message
-            msg = f"Error response while running {self.get_asset_id()} query ({response.status_code}): {clean_text}"
-            # Log the error
-            if self._debug_print:
-                self.debug_print(msg)
-            self.error_log_add(msg)
-            self.audit_log_add(f"Failure: see {self._log_name_error} for details")
-            self.onpoll_log_add("Failed", f"See {self._log_name_error} for details")
-            error_count += 1
-        else:
-            # Get results
-            results = json.loads(response)["object"] if isinstance(response, str) else response["object"]
-            results_count = len(results)
-            # results = self.devo_abhorrently_disgraceful_response_cleanup(results)
-            if self._debug_print:
-                self.debug_print(f"Returned {results_count} results ({type(results)}):\n{results}.")
+        if phantom.APP_ERROR == ret_val:
+            clean_text = re.sub(
+                r"\s+", " ", re.sub(r"<.*?>", "", response.text.replace("\n", ""))
+            )
+            msg = f"Error response while running {self.asset_id} query ({response.status_code}): {clean_text}"
+            self.debug_print(msg)
+            return action_result.set_status(phantom.APP_ERROR)
 
-            # Loop through results
-            for r, row in enumerate(results):
-                row = self.devo_response_cleanup(row)
-                # Reset alert contents for each new row
-                alert = {}
+        # Get results
+        results = json.loads(response)["object"] if isinstance(response, str) else response["object"]
+        results_count = len(results)
 
-                # Loop through columns
-                for c, col in row.items():
-                    # Convert column name to new value
-                    if c in key_map:
-                        c = key_map[c]
+        for index, row in enumerate(results):
+            row = self._devo_response_cleanup(row)
+            alert = {}
+            container_id = None
 
-                    # Do some fun value conversions or whatever
-                    if col is None or 1 > len(str(col).strip()) or "null" == str(col).lower():
-                        # Skip empty values
-                        continue
-                    else:
-                        alert[c] = col
+            # Rename column names to asset keymap settings
+            for column, value in row.items():
+                if column in self.config.on_poll_key_map.keys():
+                    column = self.config.on_poll_key_map[column]
 
-                # Alert cleaned up, insert them datums!
-                if 1 > len(alert):
-                    # Turns out this entire row was a dramatic work of baffoonery
-                    continue
-                else:
-                    # Name the container and associated alerts
-                    alert_name: Any = str(alert.get(name_col, "Empty or no signature name column."))
-                    # The eventdate recieved from Devo, usually internally aliased as "eventDate" but let us regex it just to futureproof it
-                    event_date: Any = str(alert.get(
-                        "eventdate" if 0 == len(re.findall(r"eventdate as[^\w+]+([\w]+)\s*,?", query)) else
-                        re.findall(r"eventdate as[^\w+]+([\w]+)\s*,?", query)[0]))
+            # Turns out this entire row was a dramatic work of baffoonery
+            if 1 > len(alert):
+                continue
 
-                    # Create Universally Unique Identifier if not already present
-                    if "source_data_identifier" not in alert:
-                        # The UUID here is calculated from the artifact dictionary hash
-                        alert['source_data_identifier'] = str(
-                            uuid.UUID(hex=self.dict_hash({"alert_name": alert_name, "event_date": event_date})))
-                        self.onpoll_log_add("processing",
-                                            f"source_data_identifier created: {alert['source_data_identifier']}")
-                    else:
-                        self.onpoll_log_add("processing",
-                                            f"source_data_identifier detected: {alert['source_data_identifier']}")
+            # Name the container and associated alerts
+            alert_name = str(alert.get(
+                self.config.on_poll_name_field,
+                f"Empty or no {self.config.on_poll_name_field} name column."
+            ))
 
-                    # Check if this artifact already exists
-                    params = f"?_filter_source_data_identifier=\"{urllib.parse.quote_plus(alert['source_data_identifier'])}\""
-                    uri = phanrules.build_phantom_rest_url("artifact") + params
-                    response = phanrules.requests.get(uri, verify=False)
+            # The eventdate recieved from Devo, usually aliased as "eventDate" but lets regex the query to futureproof
+            event_date = str(alert.get(
+                "eventdate"
+                if 0 == len(re.findall(r"eventdate as[^\w+]+([\w]+)\s*,?", self.config.on_poll_query))
+                else re.findall(r"eventdate as[^\w+]+([\w]+)\s*,?", self.config.on_poll_query)[0])
+            )
 
-                    if self._debug_print:
-                        self.debug_print(uri)
+            # Create Universally Unique Identifier if not already present
+            if "source_data_identifier" not in alert:
+                alert['source_data_identifier'] = str(
+                    uuid.UUID(hex=self.dict_hash({"alert_name": alert_name, "event_date": event_date})))
 
-                    # response = phanrules.requests.get(uri, verify=self._verify_server_cert)
-                    if 200 == response.status_code:
-                        if 0 < json.loads(response.text).get("count", 0):
-                            # Lol it already exists, you foolish fool
-                            duplicate_count += 1
-                            if self._debug_print:
-                                self.debug_print(
-                                    f"duplicate artifact: {json.loads(response.text).get('data')[0].get('container')}")
-                            # self.onpoll_log_add("processing", f"duplicate artifact: {json.loads(response.text).get('data')[0].get('container')}")
-                            continue
-                        else:
-                            # Not a duplicate, keep swimming!
-                            pass
-                    else:
-                        # Some kind of error
-                        msg = f"Failed to get artifact search results from {uri}: {json.loads(response.text)}"
-                        if self._debug_print:
-                            self.debug_print(msg)
-                        self.error_log_add(msg)
-                        continue
+            # Check if this artifact already exists
+            params = f"?_filter_source_data_identifier=\"{alert['source_data_identifier']}\""
+            uri = phanrules.build_phantom_rest_url("artifact") + params
+            response = phanrules.requests.get(uri, verify=False)
 
-                    # Extract CEF and aggregation data for container
-                    cef_values = {}
-                    aggregation_filter = []
-                    if aggregate_enable:
-                        if 0 == len(aggregate_fields):
-                            aggregate_fields = cef_list
-                    for key, value in alert.items():
-                        if key in cef_list:
-                            cef_values[key] = value
-                        if aggregate_enable and key in aggregate_fields:
-                            aggregation_filter.append(f"_filter_data__{key}=\"{urllib.parse.quote_plus(value)}\"")
+            if 200 == response.status_code and 0 < response.json.get("count", 0):
+                # Lol it already exists, you foolish fool
+                continue
 
-                    # Check for aggregations
-                    container_id = None
-                    if aggregate_enable:
-                        # Create API URI Parameters
-                        params = f"?{'&'.join(aggregation_filter)}&_filter_create_time__gte=\"{urllib.parse.quote_plus(aggregate_range)}\"&sort=create_time&order=desc&page_size=0"
-                        # Fails to parse:
-                        uri = phanrules.build_phantom_rest_url("artifact") + params
-                        self.onpoll_log_add("processing", f"aggregation search uri: {uri}")
-                        response = phanrules.requests.get(uri, verify=self._verify_server_cert)
-                        if 200 == response.status_code:
-                            r = json.loads(response.text).get("data", [])
-                            for artifact in r:
-                                container = self.get_container_info(container_id=artifact['container'])
-                                if self._debug_print:
-                                    self.debug_print(f"container_info: {container}")
-                                if container[0]:
-                                    container = container[1]
-                                    if not aggregate_closed:
-                                        # Keep out the riff-raff
-                                        if "closed" == container["status"].lower():
-                                            continue
-                                    # This is a valid target container ID, let's use it
-                                    container_id = artifact['container']
-                                    self.onpoll_log_add("processing",
-                                                        f"Valid aggregation target container identified: {container_id}")
-                                    # Break the loop
-                                    break
-                                else:
-                                    msg = f"Failed to get container data of id {artifact['container']}"
-                                    if self._debug_print:
-                                        self.debug_print(msg)
-                                    self.error_log_add(msg)
-                        else:
-                            msg = f"Failed to get artifact search results from {uri}: {json.loads(response.text)}"
-                            if self._debug_print:
-                                self.debug_print(msg)
-                            self.error_log_add(msg)
-                            continue
+            cef_values = {}
+            aggregation_filter = []
 
-                    # Do the container things
-                    if None != container_id:
-                        artifact = {
-                            "name": alert_name
-                            , "type": artifact_type
-                            , "cef": cef_values
-                            , "data": alert
-                            , "label": self.get_asset_label()
-                            , "tags": self.get_asset_tags()
-                            , "severity": "medium"
-                            , "hash": re.sub(r"[^ABCDEFabcdef0123456789]", "", alert['source_data_identifier'])
-                            , "identifier": alert['source_data_identifier']
-                            , "version": version
-                            , "container_id": container_id
-                            , "run_automation": False
-                        }
-                        success, message, artifact_id = self.save_artifact(artifact)
-                        if isinstance(artifact_id, int):
-                            # Success!
-                            success_count += 1
-                            aggregate_count += 1
-                            artifact_count += 1
-                            if self._debug_print:
-                                self.debug_print(
-                                    f"Artifact ({alert['source_data_identifier']}) aggregated to container: {container_id}")
-                            self.onpoll_log_add("Success",
-                                                f"Artifact ({alert['source_data_identifier']}) aggregated to container: {container_id}")
-                        else:
-                            self.error_log_add(message)
-                            error_count += 1
-                    else:
-                        # So this creates a new container, however...:
-                        #   "Don't set run_automation to true--the API automatically sets the final artifact added as
-                        #   true so playbooks only run once against each container"
-                        # This is what the documentation says SHOULD happen, but it doesn't seem to work as expected
-                        container = {
-                            "name": alert_name
-                            , "source_data_identifier": f"{alert['source_data_identifier']}"
-                            , "label": self.get_asset_label()
-                            , "tags": self.get_asset_tags()
-                            , "run_automation": False
-                            , "artifacts": [{
-                                "name": alert_name
-                                , "type": artifact_type
-                                , "cef": cef_values
-                                , "data": alert
-                                , "label": self.get_asset_label()
-                                , "tags": self.get_asset_tags()
-                                , "hash": re.sub(r"[^ABCDEFabcdef0123456789]", "", alert['source_data_identifier'])
-                                , "identifier": alert['source_data_identifier']
-                                , "version": version
-                            }]
-                        }
+            for key, value in alert.items():
+                if key in self.cef_list: cef_values[key] = value
+                if self.config.aggregate_enable and key in self.config.aggregate_fields:
+                    aggregation_filter.append(f"_filter_data__{key}=\"{urllib.parse.quote_plus(value)}\"")
 
-                        # https://docs.splunk.com/Documentation/Phantom/4.10.7/DevelopApps/AppDevAPIRef
-                        # Returns tuple: (status [phantom.APP_SUCCESS|phantom.APP_ERROR], message, id [container ID or None on fail])
-                        status, msg, container_id = self.save_container(container)
-                        if status and isinstance(container_id, int):
-                            # Success!
-                            success_count += 1
-                            container_count += 1
-                            artifact_count += 1
-                            if self._debug_print:
-                                self.debug_print(f"Container created: {container_id}")
-                                self.debug_print(f"Artifact added: {alert['source_data_identifier']}")
-                                self.debug_print(f"Message: {msg}")
-                        else:
-                            # We dun goof'd
-                            error_count += 1
-                            # Oh, how the turntables
-                            self.error_log_add(msg)
-                            self.onpoll_log_add("Failed",
-                                                f"Error while attempting to create new container with new artifact ({alert['source_data_identifier']}): {msg}")
+            if self.config.aggregate_enable and aggregation_filter:
+                params = (
+                    f"?{'&'.join(aggregation_filter)}"
+                    f"&_filter_create_time__gte=\"{urllib.parse.quote_plus(self.config.aggregate_range)}\""
+                    "&sort=create_time&order=desc&page_size=0"
+                )
+                uri = phanrules.build_phantom_rest_url("artifact") + params
+                response = phanrules.requests.get(uri, verify=self.config.verify_server_cert)
 
-        # Save overall progress for statistical analysisenthesis
-        self._state["last_run_results_count"] = results_count
-        self._state["last_run_success_count"] = success_count
-        self._state["last_run_error_count"] = error_count
-        self._state["last_run_containers_created"] = container_count
-        self._state["last_run_artifacts_created"] = artifact_count
-        self._state["last_run_duplicate_containers"] = duplicate_count
-        self._state["last_run_aggregate_count"] = aggregate_count
+                if 200 == response.status_code and 0 < len(response.json.get("data", [])):
+                    for artifact in response.json.get("data"):
+                        container_info = self.get_container_info(container_id=artifact['container'])
+                        self.debug_print(container_info)
+                        if container_info[0]:
+                            container_info = container_info[1]
+                            if "closed" != container_info["status"].lower():
+                                container_id = artifact['container_info']
+                                break
 
-        action_result.update_summary({
-            "results_count": results_count
-            , "success_count": success_count
-            , "error_count": error_count
-            , "container_count": container_count
-            , "artifact_count": artifact_count
-            , "duplicate_count": duplicate_count
-            , "aggregate_count": aggregate_count
-        })
+                            if self.config.aggregate_closed and "closed" == container_info["status"].lower():
+                                container_id = artifact['container']
+                                break
 
-        self.save_progress("Saving last run progress.")
-        # Set final action status
-        if 0 < error_count:
-            final_status = phantom.APP_ERROR
-            final_msg_status = "Failed"
-        else:
-            final_status = phantom.APP_SUCCESS
-            final_msg_status = "Succeeded"
+            if container_id:
+                artifact = {
+                    "name": alert_name
+                    , "type": self.config.on_poll_artifact_type
+                    , "cef": cef_values
+                    , "data": alert
+                    , "label": self.label
+                    , "tags": self.tags
+                    , "severity": "medium"
+                    , "identifier": alert['source_data_identifier']
+                    , "version": self.config.on_poll_query_version
+                    , "container_id": container_id
+                    , "run_automation": False
+                }
 
-        # Log the results
-        self.onpoll_log_add(final_msg_status, f"Results: {results_count}")
-        if 0 < results_count:
-            if 0 < success_count:
-                self.onpoll_log_add(final_msg_status, f"Successes: {success_count}")
-            if 0 < error_count:
-                self.onpoll_log_add(final_msg_status, f"Errors: {error_count}")
-            if 0 < duplicate_count:
-                self.onpoll_log_add(final_msg_status, f"Duplicates: {duplicate_count}")
-            if 0 < container_count:
-                self.onpoll_log_add(final_msg_status, f"Containers: {container_count}")
-            if 0 < artifact_count:
-                self.onpoll_log_add(final_msg_status, f"Artifacts: {artifact_count}")
-            if 0 < aggregate_count:
-                self.onpoll_log_add(final_msg_status, f"Aggregations: {aggregate_count}")
+                # status, message, artifact_id = self.save_artifact(artifact)
+                self.debug_print(self.save_artifact(artifact))
+
+                continue
+
+            container = {
+                "name": alert_name
+                , "source_data_identifier": f"{alert['source_data_identifier']}"
+                , "label": self.label
+                , "tags": self.tags
+                , "run_automation": False
+                , "artifacts": [{
+                    "name": alert_name
+                    , "type": self.config.on_poll_artifact_type
+                    , "cef": cef_values
+                    , "data": alert
+                    , "label": self.label
+                    , "tags": self.tags
+                    , "identifier": alert['source_data_identifier']
+                    , "version": self.config.on_poll_query_version
+                }]
+            }
+
+            # status, message, container_id = self.save_container(container)
+            self.debug_print(self.save_container(container))
 
         # Last one out, hit the lights
-        return action_result.set_status(final_status)
-
-    def _handle_crop_logs(self, param):
-        for log in [self._log_name_audit, self._log_name_error, self._log_name_on_poll]:
-            pass
-        return phantom.APP_SUCCESS
+        return action_result.set_status(phantom.APP_SUCCESS)
 
     # -----------------------#
     #   LOGGING FUNCTIONS   #
     # -----------------------#
 
-    def audit_log_add(self, message, asset_name=None):
-        if not self._decided_list_logging or not self._audit_log_logging:
+    def audit_log_add(self, message: str, asset_name: str=None):
+        if not self.config.decided_list_logging or not self.config.audit_log_logging:
             return None
 
         try:
@@ -707,14 +636,14 @@ class DevoConnector(BaseConnector):
         values = [
             datetime.datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S")
             ,
-            f"{self.get_asset_name()} (ver. {self._on_poll_query_version})" if None == asset_name else "Initializing..."
+            f"{self.asset_name} (ver. {self.config.on_poll_query_version})" if None == asset_name else "Initializing..."
             , message
         ]
         decided_list.insert(0, values)
-        phanrules.set_list(list_name=self._log_name_audit, values=decided_list)
+        phanrules.set_list(list_name=self.config.log_name_audit, values=decided_list)
 
-    def error_log_add(self, message):
-        if not self._decided_list_logging or not self._error_log_loging:
+    def error_log_add(self, message: str, asset_name: str=None):
+        if not self.config.decided_list_logging or not self.config.error_log_loging:
             return None
 
         try:
@@ -723,14 +652,14 @@ class DevoConnector(BaseConnector):
             ordered_list = []
         values = [
             datetime.datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S")
-            , f"{self.get_asset_name()} (ver. {self._on_poll_query_version})"
+            , f"{self.asset_name} (ver. {self.config.on_poll_query_version})"
             , message
         ]
         ordered_list.insert(0, values)
-        phanrules.set_list(list_name=self._log_name_audit, values=ordered_list)
+        phanrules.set_list(list_name=self.config.log_name_audit, values=ordered_list)
 
-    def onpoll_log_add(self, status, message):
-        if not self._decided_list_logging or not self._onpoll_log_loging:
+    def onpoll_log_add(self, status: bool, message: str, asset_name: str=None):
+        if not self.config.decided_list_logging or not self.config.on_poll_log_loging:
             return None
 
         try:
@@ -739,228 +668,33 @@ class DevoConnector(BaseConnector):
             ordered_list = []
         values = [
             datetime.datetime.fromtimestamp(time.time()).strftime("%Y-%m-%d %H:%M:%S")
-            , f"{self.get_asset_name()} (ver. {self._on_poll_query_version})"
+            , f"{self.asset_name} (ver. {self.config.on_poll_query_version})"
             , status
             , message
         ]
         ordered_list.insert(0, values)
-        phanrules.set_list(list_name=self._log_name_audit, values=ordered_list)
+        phanrules.set_list(list_name=self.config.log_name_audit, values=ordered_list)
 
-    def crop_log(self, log_name, time_range="1d"):
+    def crop_log(self, log_name: str, time_range:str="1d"):
         success, message, ordered_list = phanrules.get_list(list_name=log_name)
-        if self._debug_print:
+        if self.config.debug_print:
             self.debug_print(type(ordered_list))
         pass
 
-    # -------------------------#
-    #   SOAR REST API CALLS   #
-    # -------------------------#
-
-    def get_cef_list(self):
-        # Make REST call to SOAR
-        uri = phanrules.build_phantom_rest_url("cef") + "?page_size=0"
-        response = phanrules.requests.get(uri, verify=self._verify_server_cert)
-        if 200 > response.status_code or 299 < response.status_code:
-            self.error_log_add(f"Failed SOAR API call: {json.loads(response.text)['message']}")
-            return []
-
-        # Aggregate all CEFs into a single list
-        all_cefs = []
-        for cef in json.loads(response.text)['data']:
-            all_cefs.append(cef["name"])
-
-        return all_cefs
-
-    def get_asset_name(self):
-        # Make REST call to SOAR
-        uri = phanrules.build_phantom_rest_url("asset", self.get_asset_id())
-        return json.loads(phanrules.requests.get(uri, verify=self._verify_server_cert).text).get("name",
-                                                                                                 "unnamed_asset")
-
-    def get_asset_tags(self):
-        # Make REST call to SOAR
-        uri = phanrules.build_phantom_rest_url("asset", self.get_asset_id())
-        return json.loads(phanrules.requests.get(uri, verify=self._verify_server_cert).text).get("tags", [])
-
-    def get_asset_label(self):
-        # Make REST call to SOAR
-        uri = phanrules.build_phantom_rest_url("asset", self.get_asset_id())
-        return json.loads(phanrules.requests.get(uri, verify=self._verify_server_cert).text).get("configuration",
-                                                                                                 {}).get("ingest",
-                                                                                                         {}).get(
-            "container_label", None)
-
-    # ------------------#
-    #   TIME PARSERS   #
-    # ------------------#
-
-    def parse_time_input(self, time_input):
-        # Parse input string to find timestamps and time increments
-        pattern = r'((\d{4}\-\d{2}\-\d{2}(\s\d{2}:\d{2}(:\d{2})?)?)|\d+[smhdwby]|now)'
-        matches = re.findall(pattern, time_input)
-
-        # Validate correct input and correct mistakes or invalid inputs
-        if 1 > len(matches):
-            # Completely wrong input
-            matches = [("now",), (self._run_query_default_range,)]
-        if 2 > len(matches):
-            # Only one match
-            if "now" not in matches[0]:
-                # Only a timestamp or date range exists, so add "now" as anchor
-                matches.append(("now",))
-            else:
-                # Only "now" exists as anchor, so add range for calculations
-                matches.append((self._run_query_default_range,))
-        if 3 > len(matches):
-            # Mostly correct, just verify not two "now" strings present
-            if "now" == matches[0][0] and "now" == matches[1][0]:
-                # Okay, we almost made it, but there's two "now" strings, so use default ingest range instead
-                matches.pop(1)
-                matches.append((self._run_query_default_range,))
-
-        # Pretty-up input variable names
-        time_input_a = matches[0][0]
-        time_input_b = matches[1][0]
-
-        # Check input types and parse accordingly
-        if self.is_timestamp(time_input_a) and self.is_timestamp(time_input_b):
-            # If both Y-m-d <H:i:s>, parse to epoch seconds and get min/max for beg/end
-            time_input_a = self.parse_timestamp(time_input_a)
-            time_input_b = self.parse_timestamp(time_input_b)
-            time_input_beg = min(time_input_a, time_input_b)
-            time_input_end = max(time_input_a, time_input_b)
-        elif self.is_time_increment(time_input_a) and self.is_time_increment(time_input_b):
-            # If both increment (eg, 2d), parse to epoch seconds and get difference from now() anchor
-            time_input_a = self.parse_time_increment(time_input_a)
-            time_input_b = self.parse_time_increment(time_input_b)
-            time_input_beg = time.time() - max(time_input_a, time_input_b)
-            time_input_end = time.time() - min(time_input_a, time_input_b)
-        elif "now" == time_input_a or "now" == time_input_b:
-            # If one input is "now", parse other input to epoc seconds and get difference from now() anchor
-            time_input_end = time.time()
-            increment = time_input_a if time_input_a != "now" else time_input_b
-            if self.is_timestamp(increment):
-                # It's a timestamp!
-                time_input_beg = self.parse_timestamp(increment)
-            else:
-                # It's a time range!
-                time_input_beg = time.time() - self.parse_time_increment(increment)
-        else:
-            # If we get here, one input is a timestamp, the other is a time increment
-            # If input a is an increment, use it as the increment, otherwise use input b
-            increment = time_input_a if self.is_time_increment(time_input_a) else time_input_b
-            # If input a is a timestamp, use it as the anchor, otherwise use input b
-            anchor = time_input_a if self.is_timestamp(time_input_a) else time_input_b
-            # Remove both inputs from the time input and get the offset (either "-" or "+")
-            offset = time_input.replace(time_input_a, "").replace(time_input_b, "").strip()
-            # In case the offset character isn't found, default to "-"
-            offset = "-" if 1 != len(offset) else offset
-            if "+" == offset:
-                # The increment should be offset into the future from the anchor
-                time_input_beg = self.parse_timestamp(anchor)
-                time_input_end = time_input_beg + self.parse_time_increment(increment)
-            else:
-                # The increment should be offset into the past from the anchor
-                time_input_end = self.parse_timestamp(anchor)
-                time_input_beg = time_input_end - self.parse_time_increment(increment)
-
-        # Input validation and parsing complete!
-        return time_input_beg, time_input_end
-
-    def parse_time_increment(self, t_str) -> float | int:
-        t_str = t_str.lower().strip()
-
-        if "now" == t_str:
-            return time.time()
-
-        if re.fullmatch(r'^\d+(s|m|h|d|w|b|y)$', t_str):
-            t_diff = 0
-            quantity = int(t_str[0:-1])
-            interval = t_str[-1]
-
-            if 'y' == interval:
-                # year
-                t_diff = t_diff + (quantity * 31536000)
-            if 'b' == interval:
-                # month
-                t_diff = t_diff + (quantity * 2678400)
-            if 'w' == interval:
-                # week
-                t_diff = t_diff + (quantity * 604800)
-            if 'd' == interval:
-                # day
-                t_diff = t_diff + (quantity * 86400)
-            if 'h' == interval:
-                # hour
-                t_diff = t_diff + (quantity * 3600)
-            if 'm' == interval:
-                # minute
-                t_diff = t_diff + (quantity * 60)
-            if 's' == interval:
-                # second
-                t_diff = t_diff + (quantity * 1)
-            return t_diff
-        else:
-            # No matches? This shouldn't happen, but just in case...default is our friend!
-            msg = f"Failed to properly parse time inchrement: {t_str}"
-            if self._debug_print:
-                self.debug_print(msg)
-            self.error_log_add(msg)
-            return self.parse_time_increment(self._run_query_default_range)
-
-    def parse_timestamp(self, t_str):
-        pattern = r'^\d{4}\-\d{2}\-\d{2}(\s\d{2}:\d{2}(:\d{2})?)?$'
-        matches = re.fullmatch(pattern, t_str)
-        if matches:
-            # Python is silly and can't auto detect formats so let's just brute-force it unstead of 30 lines of if-else statements
-            try:
-                t_str = datetime.datetime.now().strptime(matches[0], "%Y-%m-%d %H:%M:%S").timestamp()
-            except Exception:
-                try:
-                    t_str = datetime.datetime.now().strptime(matches[0], "%Y-%m-%d %H:%M").timestamp()
-                except Exception:
-                    try:
-                        t_str = datetime.datetime.now().strptime(matches[0], "%Y-%m-%d").timestamp()
-                    except Exception:
-                        # It already regex matched before this so if it gets here, there's a glitch in the matrix
-                        msg = f"Failed to properly parse timestamp: {t_str}"
-                        if self._debug_print:
-                            self.debug_print(msg)
-                        self.error_log_add(msg)
-                        return None
-            return t_str
-
-    def is_time_increment(self, t_str):
-        return True if re.fullmatch(re.compile(r'^\d+(s|m|h|d|w|b|y)$', re.IGNORECASE), t_str) else False
-
-    def is_timestamp(self, t_str):
-        return True if re.fullmatch(r'^\d{4}\-\d{2}\-\d{2}(\s\d{2}:\d{2}(:\d{2})?)?$', t_str) else False
-
-    def parse_aggregate_range(self, t_str):
-        seconds = self.parse_time_increment(t_str) if self.is_time_increment(t_str) else self.parse_time_increment("1d")
-        t_sec = datetime.datetime.utcfromtimestamp(time.time() - seconds)
-        t_stamp = t_sec.strftime("%Y-%m-%d %H:%M:%S")
-        return t_stamp
-
-    # ----------------------#
+    # ---------------------#
     #   HELPER FUNCTIONS   #
-    # ----------------------#
+    # ---------------------#
 
-    def dict_hash(self, dictionary):
-        # Sort by key so {'a': 1, 'b': 2} is the same as {'b': 2, 'a': 1}
+    def dict_hash(self, dictionary: dict) -> str:
         {k: dictionary[k] for k in sorted(dictionary)}
-        # Get the MD5 of the dictionary and bypass FIPS since this isn't for security
-        dictionary_hash = hashlib.md5(str(dictionary).encode(), usedforsecurity=False)
-        # Return hash hex digest of dictionary
-        return dictionary_hash.hexdigest()
+        return self.str_hash(str(dictionary))
 
-    def str_hash(self, input_str):
+    def str_hash(self, input_str: str) -> str:
         return hashlib.md5(str(input_str).encode(), usedforsecurity=False).hexdigest()
 
-    def field_list_from_string(self, input_str):
+    def field_list_from_string(self, input_str: str) -> list:
         output_list = re.split(r"\s*,\s*", input_str)
-        while ("" in output_list):
-            output_list.remove("")
+        while ("" in output_list): output_list.remove("")
         return output_list
 
     # --------------------#
@@ -968,62 +702,58 @@ class DevoConnector(BaseConnector):
     # --------------------#
 
     def initialize(self):
+
         # Load the state in initialize, use it to store data that needs to be accessed across actions
-        self._state = self.load_state()
+        self.state = self.load_state()
 
-        # get the asset configuration
-        config = self.get_config()
-        self._base_url = config.get("base_url")
-        self._api_token = config.get("api_token")
-        self._verify_server_cert = config.get("verify_server_cert", False)
+        # Set the asset configuration
+        config_default = {
+            "base_url": "",
+            "api_token": "",
+            "verify_server_cert": False,
+            "query_endpoint": "/lt-api/v2/search/query",
 
-        # Log names
-        self._log_name_error = config.get("log_name_error", "devoQueryIngest_ErrorLog")
-        self._log_name_audit = config.get("log_name_audit", "devoQueryIngest_AuditLog")
-        self._log_name_on_poll = config.get("log_name_on_poll", "devoQueryIngest_OnPollLog")
+            # Log names
+            "log_name_error": "devoQueryIngest_ErrorLog",
+            "log_name_audit": "devoQueryIngest_AuditLog",
+            "log_name_on_poll": "devoQueryIngest_OnPollLog",
 
-        # run_query action default parameters
-        self._run_query_default_range = config.get("run_query_default_range", "1w-now")
-        self._run_query_result_limit = config.get("run_query_result_limit", 1000)
+            # Logging Enable
+            "debug_print": True,
+            "decided_list_logging": False,
+            "audit_log_logging": False,
+            "error_log_loging": False,
+            "on_poll_log_loging": False,
 
-        # on_poll action default parameters
-        self._on_poll_query = config.get("on_poll_query", "")
-        self._on_poll_time_range = config.get("on_poll_time_range", "1d-now")
-        self._on_poll_result_limit = config.get("on_poll_result_limit", 1000)
-        self._on_poll_name_field = config.get("on_poll_name_field", "signature")
-        self._on_poll_query_version = config.get("on_poll_query_version", 1)
-        self._on_poll_artifact_type = config.get("on_poll_artifact_type", "host")
-        self._on_poll_key_map = json.loads(config.get("on_poll_key_map", "{}"))
+            # run_query action default parameters
+            "run_query_default_range": "2w-now",
+            "run_query_result_limit": 1000,
+            "run_query_endpoint": "/lt-api/v2/search/query",
 
-        # Internal aggregation configuration
-        self._aggregate_enable = config.get("aggregate_enable", False)
-        self._aggregate_closed = config.get("aggregate_closed", False)
-        self._aggregate_fields = self.field_list_from_string(config.get("aggregate_fields", "").strip())
-        self._aggregate_range = self.parse_aggregate_range(config.get("aggregate_range", "1d").strip())
+            # on_poll action default parameters
+            "on_poll_query": "",
+            "on_poll_time_range": "1d-now",
+            "on_poll_result_limit": 1000,
+            "on_poll_name_field": "signature",
+            "on_poll_query_version": 1,
+            "on_poll_artifact_type": "host",
+            "on_poll_key_map": {},
 
-        # Logging Enable
-        self._debug_print = True
-        self._decided_list_logging = False
-        self._audit_log_logging = False
-        self._error_log_loging = False
-        self._onpoll_log_loging = False
-        self.audit_log_add("Initializing...", self.get_asset_id())
+            # Internal aggregation configuration
+            "aggregate_enable": True,
+            "aggregate_fields": "",
+            "aggregate_closed": False,
+            "aggregate_range": "1d"
+        }
+        self.config = SettingsParser(settings=self.get_config(), defaults=config_default)
 
         return phantom.APP_SUCCESS
 
     def finalize(self):
         # Save the state, this data is saved across actions and app upgrades
-        self.save_state(self._state)
+        self.save_state(self.state)
         return phantom.APP_SUCCESS
 
-    def _set_default_config(self, configs) -> None:
-        defaults = {}
-        for config in configs:
-            pass
-    def _set_default_params(self, params) -> None:
-        defaults = {}
-        for param in params:
-            pass
 
 def main():
     import argparse
