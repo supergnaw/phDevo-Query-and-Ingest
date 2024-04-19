@@ -424,7 +424,7 @@ class DevoConnector(BaseConnector):
         }
 
         data = json.dumps({
-            "limit": self.params.limit,
+            "limit": self.params.result_limit,
             "query": self.params.query,
             "from": from_time,
             "to": to_time,
@@ -503,20 +503,37 @@ class DevoConnector(BaseConnector):
 
         # Get results
         results = json.loads(response)["object"] if isinstance(response, str) else response["object"]
-        results_count = len(results)
 
-        for index, row in enumerate(results):
-            row = self._devo_response_cleanup(row)
+        self.state["last_run_results_count"] = len(results)
+        self.state["last_run_success_count"] = 0
+        self.state["last_run_error_count"] = 0
+        self.state["last_run_containers_created"] = 0
+        self.state["last_run_artifacts_created"] = 0
+        self.state["last_run_duplicate_containers"] = 0
+        self.state["last_run_aggregate_count"] = 0
+
+        for result in results:
+            row = self._devo_response_cleanup(result)
             alert = {}
             container_id = None
 
-            # Rename column names to asset keymap settings
+            # Prepare alert dictionary from result row
             for column, value in row.items():
+
+                # Skip null values
+                if not value:
+                    continue
+
+                # Rename column names to asset keymap settings
                 if column in self.config.on_poll_key_map.keys():
                     column = self.config.on_poll_key_map[column]
 
+                # Add value to alert dictionary
+                alert[column] = value
+
             # Turns out this entire row was a dramatic work of baffoonery
             if 1 > len(alert):
+                # Skip to next row
                 continue
 
             # Name the container and associated alerts
@@ -544,6 +561,7 @@ class DevoConnector(BaseConnector):
 
             if 200 == response.status_code and 0 < response.json.get("count", 0):
                 # Lol it already exists, you foolish fool
+                self.state["last_run_duplicate_containers"] += 1
                 continue
 
             cef_values = {}
@@ -592,8 +610,12 @@ class DevoConnector(BaseConnector):
                     , "run_automation": False
                 }
 
-                # status, message, artifact_id = self.save_artifact(artifact)
-                self.debug_print(self.save_artifact(artifact))
+                status, message, artifact_id = self.save_artifact(artifact)
+
+                if status:
+                    self.state["last_run_aggregate_count"] += 1
+                else:
+                    self.state["last_run_error_count"] += 1
 
                 continue
 
@@ -615,8 +637,12 @@ class DevoConnector(BaseConnector):
                 }]
             }
 
-            # status, message, container_id = self.save_container(container)
-            self.debug_print(self.save_container(container))
+            status, message, container_id = self.save_container(container)
+
+            if status:
+                self.state["last_run_containers_created"] += 1
+            else:
+                self.state["last_run_error_count"] += 1
 
         # Last one out, hit the lights
         return action_result.set_status(phantom.APP_SUCCESS)
@@ -714,9 +740,9 @@ class DevoConnector(BaseConnector):
             "query_endpoint": "/lt-api/v2/search/query",
 
             # Log names
-            "log_name_error": "devoQueryIngest_ErrorLog",
-            "log_name_audit": "devoQueryIngest_AuditLog",
-            "log_name_on_poll": "devoQueryIngest_OnPollLog",
+            "log_name_error": "devoQueryandIngest_ErrorLog",
+            "log_name_audit": "devoQueryandIngest_AuditLog",
+            "log_name_on_poll": "devoQueryandIngest_OnPollLog",
 
             # Logging Enable
             "debug_print": True,
